@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0b0f14;
+  --surface: #121821;
+  --surface-2: #19212c;
+  --border: #243040;
+  --foreground: #e6edf3;
+  --muted: #8b98a8;
+  --ps: #2f7ff5;
+  --xbox: #34c759;
+  --gold: #e6b422;
+  --silver: #b8c2cc;
+  --bronze: #c97b3a;
+  --platinum: #7fd7ff;
+  --danger: #ff5c5c;
+  --warning: #ffb020;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-ps: var(--ps);
+  --color-xbox: var(--xbox);
+  --color-gold: var(--gold);
+  --color-silver: var(--silver);
+  --color-bronze: var(--bronze);
+  --color-platinum: var(--platinum);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-border bg-surface p-5;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 bg-foreground text-background hover:opacity-90;
+  }
+  .btn-ps {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 bg-ps text-white hover:brightness-110;
+  }
+  .btn-xbox {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 bg-xbox text-black hover:brightness-110;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 border border-border bg-transparent text-foreground hover:bg-surface-2;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 border border-danger/40 bg-transparent text-danger hover:bg-danger/10;
+  }
+  .input {
+    @apply w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-foreground outline-none focus:border-ps;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+  }
+  .muted {
+    @apply text-muted;
+  }
+}
