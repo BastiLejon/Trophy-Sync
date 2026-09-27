@@ -111,7 +111,7 @@ export class RealPsnClient implements PsnClient {
     ]);
     const trophies: PsnTrophyDefinition[] = defs.trophies.map((t) => ({
       trophyId: t.trophyId,
-      name: t.trophyName ?? `Trophäe ${t.trophyId}`,
+      name: t.trophyName ?? `Trophy ${t.trophyId}`,
       detail: t.trophyDetail ?? "",
       type: t.trophyType,
       hidden: Boolean(t.trophyHidden),

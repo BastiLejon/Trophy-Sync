@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db, nowIso, schema } from "@/lib/db";
 import { env } from "@/lib/env";
+import { openToken, sealToken } from "@/lib/crypto";
 import {
   ensureGameMapping,
   upsertPsGame,
@@ -14,8 +15,16 @@ import { DemoXboxClient } from "@/lib/providers/xbox/demo";
 import { RealXboxClient, refreshXboxTokens, type XboxSessionTokens } from "@/lib/providers/xbox/real";
 import type { PsnClient, PsnProfile, XboxClient, XboxProfile } from "@/lib/providers/types";
 
-const { users, psnAccounts, xboxAccounts, userPsTitles, userPsTrophies, userXboxTitles, userXboxAchievements } =
-  schema;
+const {
+  users,
+  psnAccounts,
+  xboxAccounts,
+  userPsTitles,
+  userPsTrophies,
+  userXboxTitles,
+  userXboxAchievements,
+  accountPairings,
+} = schema;
 
 /* ---------- Konten verknüpfen ---------- */
 
@@ -39,8 +48,8 @@ export function linkPsnAccount(
     onlineId: profile.onlineId,
     avatarUrl: profile.avatarUrl,
     isDemo: tokens === null,
-    accessToken: tokens?.accessToken ?? null,
-    refreshToken: tokens?.refreshToken ?? null,
+    accessToken: sealToken(tokens?.accessToken),
+    refreshToken: sealToken(tokens?.refreshToken),
     accessExpiresAt: tokens?.accessExpiresAt ?? null,
     refreshExpiresAt: tokens?.refreshExpiresAt ?? null,
     trophyLevel: profile.trophyLevel,
@@ -75,8 +84,8 @@ export function linkXboxAccount(
     gamerpicUrl: profile.gamerpicUrl,
     gamerscore: profile.gamerscore,
     isDemo: tokens === null,
-    msRefreshToken: tokens?.msRefreshToken ?? null,
-    xstsToken: tokens?.xstsToken ?? null,
+    msRefreshToken: sealToken(tokens?.msRefreshToken),
+    xstsToken: sealToken(tokens?.xstsToken),
     userHash: tokens?.userHash ?? null,
     xstsExpiresAt: tokens?.xstsExpiresAt ?? null,
   };
@@ -111,13 +120,82 @@ export function getAccounts(userId: number) {
   };
 }
 
+/* ---------- Feste Paarungen ---------- */
+
+export class PairingConflictError extends Error {
+  constructor(
+    public readonly kind: "psnTaken" | "xboxTaken",
+    public readonly psnOnlineId: string,
+    public readonly gamertag: string,
+  ) {
+    super(
+      kind === "psnTaken"
+        ? `PlayStation account ${psnOnlineId} is already paired with Xbox account ${gamertag}.`
+        : `Xbox account ${gamertag} is already paired with PlayStation account ${psnOnlineId}.`,
+    );
+  }
+}
+
+export function getPairingForUser(userId: number): schema.AccountPairing | null {
+  const { psn, xbox } = getAccounts(userId);
+  if (psn) {
+    const p = db.select().from(accountPairings).where(eq(accountPairings.psnAccountId, psn.accountId)).get();
+    if (p) return p;
+  }
+  if (xbox) {
+    const p = db.select().from(accountPairings).where(eq(accountPairings.xuid, xbox.xuid)).get();
+    if (p) return p;
+  }
+  return null;
+}
+
+/**
+ * Stellt sicher, dass das PSN- und das Xbox-Konto des Nutzers exklusiv miteinander gepaart sind.
+ * Legt die Paarung beim ersten Sync an; wirft, wenn eines der Konten bereits anders gepaart ist.
+ */
+export function ensurePairing(userId: number): schema.AccountPairing {
+  const { psn, xbox } = getAccounts(userId);
+  if (!psn || !xbox) throw new Error("Both accounts must be linked.");
+  const byPsn = db.select().from(accountPairings).where(eq(accountPairings.psnAccountId, psn.accountId)).get();
+  const byXuid = db.select().from(accountPairings).where(eq(accountPairings.xuid, xbox.xuid)).get();
+  if (byPsn && byPsn.xuid !== xbox.xuid) throw new PairingConflictError("psnTaken", byPsn.psnOnlineId, byPsn.gamertag);
+  if (byXuid && byXuid.psnAccountId !== psn.accountId) throw new PairingConflictError("xboxTaken", byXuid.psnOnlineId, byXuid.gamertag);
+  if (byPsn) {
+    db.update(accountPairings)
+      .set({ psnOnlineId: psn.onlineId, gamertag: xbox.gamertag, lastSyncAt: nowIso(), syncCount: byPsn.syncCount + 1 })
+      .where(eq(accountPairings.id, byPsn.id))
+      .run();
+    return { ...byPsn, lastSyncAt: nowIso(), syncCount: byPsn.syncCount + 1 };
+  }
+  return db
+    .insert(accountPairings)
+    .values({ psnAccountId: psn.accountId, psnOnlineId: psn.onlineId, xuid: xbox.xuid, gamertag: xbox.gamertag, lastSyncAt: nowIso(), syncCount: 1 })
+    .returning()
+    .get();
+}
+
+export function listPairings() {
+  return db.select().from(accountPairings).orderBy(accountPairings.pairedAt).all().reverse();
+}
+
+export function releasePairing(id: number) {
+  db.delete(accountPairings).where(eq(accountPairings.id, id)).run();
+}
+
+/** Ein Konto, das bereits fest gepaart ist, darf nicht gelöst werden (sonst ließe es sich neu kombinieren). */
+export function isUnlinkLocked(userId: number): boolean {
+  return getPairingForUser(userId) !== null;
+}
+
 export function unlinkPsn(userId: number) {
+  if (isUnlinkLocked(userId)) throw new Error("locked");
   db.delete(psnAccounts).where(eq(psnAccounts.userId, userId)).run();
   db.delete(userPsTitles).where(eq(userPsTitles.userId, userId)).run();
   db.delete(userPsTrophies).where(eq(userPsTrophies.userId, userId)).run();
 }
 
 export function unlinkXbox(userId: number) {
+  if (isUnlinkLocked(userId)) throw new Error("locked");
   db.delete(xboxAccounts).where(eq(xboxAccounts.userId, userId)).run();
   db.delete(userXboxTitles).where(eq(userXboxTitles.userId, userId)).run();
   db.delete(userXboxAchievements).where(eq(userXboxAchievements.userId, userId)).run();
@@ -127,20 +205,21 @@ export function unlinkXbox(userId: number) {
 
 export async function getPsnClient(userId: number): Promise<PsnClient> {
   const acc = db.select().from(psnAccounts).where(eq(psnAccounts.userId, userId)).get();
-  if (!acc) throw new Error("Kein PlayStation-Konto verknüpft.");
+  if (!acc) throw new Error("No PlayStation account linked.");
   if (acc.isDemo) {
-    if (!env.demoMode) throw new Error("Demo-Modus ist deaktiviert.");
+    if (!env.demoMode) throw new Error("Demo mode is disabled.");
     return new DemoPsnClient();
   }
-  let accessToken = acc.accessToken!;
+  let accessToken = openToken(acc.accessToken);
   const expiresSoon = !acc.accessExpiresAt || new Date(acc.accessExpiresAt).getTime() - Date.now() < 60_000;
-  if (expiresSoon) {
-    if (!acc.refreshToken) throw new Error("PSN-Sitzung abgelaufen. Bitte erneut anmelden.");
-    const t = await refreshPsnTokens(acc.refreshToken);
+  if (expiresSoon || !accessToken) {
+    const refreshToken = openToken(acc.refreshToken);
+    if (!refreshToken) throw new Error("PSN session expired. Please sign in again.");
+    const t = await refreshPsnTokens(refreshToken);
     db.update(psnAccounts)
       .set({
-        accessToken: t.accessToken,
-        refreshToken: t.refreshToken,
+        accessToken: sealToken(t.accessToken),
+        refreshToken: sealToken(t.refreshToken),
         accessExpiresAt: t.accessExpiresAt,
         refreshExpiresAt: t.refreshExpiresAt,
       })
@@ -148,23 +227,30 @@ export async function getPsnClient(userId: number): Promise<PsnClient> {
       .run();
     accessToken = t.accessToken;
   }
-  return new RealPsnClient(accessToken);
+  return new RealPsnClient(accessToken!);
 }
 
 export async function getXboxClient(userId: number): Promise<XboxClient> {
   const acc = db.select().from(xboxAccounts).where(eq(xboxAccounts.userId, userId)).get();
-  if (!acc) throw new Error("Kein Xbox-Konto verknüpft.");
+  if (!acc) throw new Error("No Xbox account linked.");
   if (acc.isDemo) {
-    if (!env.demoMode) throw new Error("Demo-Modus ist deaktiviert.");
+    if (!env.demoMode) throw new Error("Demo mode is disabled.");
     return new DemoXboxClient();
   }
-  let { xstsToken, userHash } = acc;
+  let xstsToken = openToken(acc.xstsToken);
+  let userHash = acc.userHash;
   const expiresSoon = !acc.xstsExpiresAt || new Date(acc.xstsExpiresAt).getTime() - Date.now() < 60_000;
   if (expiresSoon || !xstsToken || !userHash) {
-    if (!acc.msRefreshToken) throw new Error("Xbox-Sitzung abgelaufen. Bitte erneut anmelden.");
-    const t = await refreshXboxTokens(acc.msRefreshToken);
+    const msRefreshToken = openToken(acc.msRefreshToken);
+    if (!msRefreshToken) throw new Error("Xbox session expired. Please sign in again.");
+    const t = await refreshXboxTokens(msRefreshToken);
     db.update(xboxAccounts)
-      .set({ msRefreshToken: t.msRefreshToken, xstsToken: t.xstsToken, userHash: t.userHash, xstsExpiresAt: t.xstsExpiresAt })
+      .set({
+        msRefreshToken: sealToken(t.msRefreshToken),
+        xstsToken: sealToken(t.xstsToken),
+        userHash: t.userHash,
+        xstsExpiresAt: t.xstsExpiresAt,
+      })
       .where(eq(xboxAccounts.id, acc.id))
       .run();
     xstsToken = t.xstsToken;

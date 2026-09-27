@@ -281,6 +281,31 @@ export const userXboxAchievements = sqliteTable(
   ],
 );
 
+/* ---------- Feste Konto-Paarungen (zentral, plattformübergreifend) ---------- */
+
+/**
+ * Nach dem ersten erfolgreichen Sync wird ein PSN-Konto fest mit genau einem Xbox-Konto
+ * gepaart. Die Paarung bleibt bestehen, auch wenn der Nutzer die Verknüpfung löst, damit
+ * kein Konto ein zweites Mal (mit einem anderen Gegenkonto) verwendet werden kann.
+ */
+export const accountPairings = sqliteTable(
+  "account_pairings",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    psnAccountId: text("psn_account_id").notNull(),
+    psnOnlineId: text("psn_online_id").notNull(),
+    xuid: text("xuid").notNull(),
+    gamertag: text("gamertag").notNull(),
+    pairedAt: text("paired_at").notNull().default(now()),
+    lastSyncAt: text("last_sync_at"),
+    syncCount: integer("sync_count").notNull().default(0),
+  },
+  (t) => [
+    uniqueIndex("account_pairings_psn").on(t.psnAccountId),
+    uniqueIndex("account_pairings_xuid").on(t.xuid),
+  ],
+);
+
 /* ---------- Sync-Läufe ---------- */
 
 export const SYNC_ITEM_RESULT = [
@@ -342,4 +367,5 @@ export type XboxAchievement = typeof xboxAchievements.$inferSelect;
 export type GameMapping = typeof gameMappings.$inferSelect;
 export type TrophyMapping = typeof trophyMappings.$inferSelect;
 export type SyncRun = typeof syncRuns.$inferSelect;
+export type AccountPairing = typeof accountPairings.$inferSelect;
 export type SyncRunItem = typeof syncRunItems.$inferSelect;

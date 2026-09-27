@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db, nowIso, schema, type SyncItemResult } from "@/lib/db";
-import { importPsnLibrary, importXboxLibrary } from "@/lib/accounts";
+import { ensurePairing, importPsnLibrary, importXboxLibrary } from "@/lib/accounts";
 import type { PsnClient, XboxClient } from "@/lib/providers/types";
 
 const {
@@ -53,6 +53,8 @@ export async function runSync(
   userId: number,
   clients: { psn?: PsnClient; xbox?: XboxClient } = {},
 ): Promise<{ runId: number; summary: SyncSummary }> {
+  // Vor dem ersten Datenzugriff: Konten exklusiv paaren (oder abbrechen, wenn schon anders gepaart).
+  ensurePairing(userId);
   const run = db.insert(syncRuns).values({ userId, status: "running" }).returning().get();
   try {
     const psnImport = await importPsnLibrary(userId, clients.psn);

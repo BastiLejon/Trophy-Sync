@@ -35,38 +35,12 @@ export function Artwork({
   );
 }
 
-const trophyColors: Record<string, string> = {
-  bronze: "bg-bronze/20 text-bronze",
-  silver: "bg-silver/20 text-silver",
-  gold: "bg-gold/20 text-gold",
-  platinum: "bg-platinum/20 text-platinum",
-};
-
-export function TrophyBadge({ type }: { type: string }) {
-  const label = { bronze: "Bronze", silver: "Silber", gold: "Gold", platinum: "Platin" }[type] ?? type;
-  return <span className={`badge ${trophyColors[type] ?? "bg-surface-2"}`}>🏆 {label}</span>;
-}
-
 export function GamerscoreBadge({ value, muted = false }: { value: number; muted?: boolean }) {
   return (
     <span className={`badge ${muted ? "bg-surface-2 text-muted" : "bg-xbox/15 text-xbox"}`}>
       <span aria-hidden>G</span> {value}
     </span>
   );
-}
-
-export function SourceBadge({ source }: { source: "xbox" | "playstation" }) {
-  return source === "xbox" ? (
-    <span className="badge bg-xbox/15 text-xbox">Xbox</span>
-  ) : (
-    <span className="badge bg-ps/15 text-ps">PS-Sync</span>
-  );
-}
-
-export function StatusBadge({ status }: { status: "pending" | "mapped" | "no_counterpart" }) {
-  if (status === "mapped") return <span className="badge bg-xbox/15 text-xbox">gemappt</span>;
-  if (status === "no_counterpart") return <span className="badge bg-surface-2 text-muted">kein Gegenstück</span>;
-  return <span className="badge bg-warning/15 text-warning">offen</span>;
 }
 
 export function Progress({ value, className = "" }: { value: number; className?: string }) {

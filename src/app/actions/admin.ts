@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth";
+import { getT } from "@/lib/i18n/server";
+import { releasePairing } from "@/lib/accounts";
 import { db, schema } from "@/lib/db";
 import { env } from "@/lib/env";
 import {
@@ -95,9 +97,9 @@ export type ImportState = { error?: string; ok?: string } | undefined;
  * Quelle: das verknüpfte Xbox-Konto des Admins (echt) oder der Demo-Katalog.
  */
 export async function importXboxTitle(_prev: ImportState, formData: FormData): Promise<ImportState> {
-  const session = await requireAdmin();
+  const [session, { t }] = await Promise.all([requireAdmin(), getT()]);
   const titleId = String(formData.get("titleId") ?? "").trim();
-  if (!titleId) return { error: "Bitte eine Xbox Title-ID angeben." };
+  if (!titleId) return { error: t("adminCatalog.error.titleId") };
   try {
     let info: XboxTitleInfo | undefined;
     let client;
@@ -106,11 +108,11 @@ export async function importXboxTitle(_prev: ImportState, formData: FormData): P
       const t = demoXboxCatalog.find((t) => t.titleId === titleId)!;
       info = { ...t };
     } else {
-      if (!session.userId) return { error: "Für den Live-Import muss der Admin selbst mit einem Xbox-Konto angemeldet sein." };
+      if (!session.userId) return { error: t("adminCatalog.error.needXbox") };
       client = await getXboxClient(session.userId);
       const achievements = await client.getTitleAchievements(titleId);
-      if (!achievements.length) return { error: "Keine Achievements gefunden. Der Titel muss mindestens einmal vom Admin-Konto gestartet worden sein." };
-      const name = String(formData.get("name") ?? "").trim() || `Xbox-Titel ${titleId}`;
+      if (!achievements.length) return { error: t("adminCatalog.error.noAchievements") };
+      const name = String(formData.get("name") ?? "").trim() || `Xbox title ${titleId}`;
       info = {
         titleId,
         name,
@@ -124,13 +126,14 @@ export async function importXboxTitle(_prev: ImportState, formData: FormData): P
       upsertXboxAchievements(row.id, achievements);
       for (const game of db.select().from(schema.psGames).all()) ensureGameMapping(game);
       revalidatePath("/admin/catalog");
-      return { ok: `„${name}“ mit ${achievements.length} Achievements importiert.` };
+      return { ok: t("adminCatalog.ok.imported", { name, n: achievements.length }) };
     }
     const row = upsertXboxTitle(info);
-    upsertXboxAchievements(row.id, await client.getTitleAchievements(titleId));
+    const list = await client.getTitleAchievements(titleId);
+    upsertXboxAchievements(row.id, list);
     for (const game of db.select().from(schema.psGames).all()) ensureGameMapping(game);
     revalidatePath("/admin/catalog");
-    return { ok: `„${info.name}“ importiert.` };
+    return { ok: t("adminCatalog.ok.imported", { name: info.name, n: list.length }) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -138,7 +141,7 @@ export async function importXboxTitle(_prev: ImportState, formData: FormData): P
 
 /** Importiert einen Xbox-Titel aus eingefügtem JSON (Format siehe Katalogseite). */
 export async function importXboxTitleJson(_prev: ImportState, formData: FormData): Promise<ImportState> {
-  await requireAdmin();
+  const [, { t }] = await Promise.all([requireAdmin(), getT()]);
   try {
     const parsed = JSON.parse(String(formData.get("json") ?? "")) as {
       titleId: string;
@@ -146,7 +149,7 @@ export async function importXboxTitleJson(_prev: ImportState, formData: FormData
       iconUrl?: string;
       achievements: { id: string; name: string; description?: string; gamerscore: number; iconUrl?: string; isSecret?: boolean }[];
     };
-    if (!parsed.titleId || !parsed.name || !Array.isArray(parsed.achievements)) throw new Error("titleId, name und achievements[] sind Pflicht.");
+    if (!parsed.titleId || !parsed.name || !Array.isArray(parsed.achievements)) throw new Error(t("adminCatalog.error.jsonFields"));
     const row = upsertXboxTitle({
       titleId: String(parsed.titleId),
       name: parsed.name,
@@ -173,9 +176,9 @@ export async function importXboxTitleJson(_prev: ImportState, formData: FormData
     );
     for (const game of db.select().from(schema.psGames).all()) ensureGameMapping(game);
     revalidatePath("/admin/catalog");
-    return { ok: `„${parsed.name}“ mit ${parsed.achievements.length} Achievements importiert.` };
+    return { ok: t("adminCatalog.ok.imported", { name: parsed.name, n: parsed.achievements.length }) };
   } catch (err) {
-    return { error: `Import fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}` };
+    return { error: t("adminCatalog.error.json", { message: err instanceof Error ? err.message : String(err) }) };
   }
 }
 
@@ -186,4 +189,13 @@ export async function deleteXboxTitle(formData: FormData): Promise<void> {
   db.delete(schema.xboxTitles).where(eq(schema.xboxTitles.id, id)).run();
   revalidatePath("/admin/catalog");
   revalidatePath("/admin/games");
+}
+
+export async function releasePairingAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const id = num(formData.get("id"));
+  if (!id) return;
+  releasePairing(id);
+  revalidatePath("/admin/pairings");
+  revalidatePath("/admin");
 }

@@ -194,7 +194,7 @@ export function refreshTrophySuggestions(
         status: "no_counterpart" as const,
         suggestedXboxAchievementId: null,
         suggestionConfidence: null,
-        note: "Platin-Trophäe: Xbox kennt kein Äquivalent.",
+        note: "platinum",
         decidedBy: "system",
         decidedAt: nowIso(),
         updatedAt: nowIso(),
@@ -221,7 +221,7 @@ export function refreshTrophySuggestions(
       status: autoAccept ? ("mapped" as const) : ("pending" as const),
       suggestedXboxAchievementId: suggestion?.item.id ?? null,
       suggestionConfidence: suggestion?.score ?? null,
-      note: autoAccept ? `Automatisch übernommen (Ähnlichkeit ${(suggestion!.score * 100).toFixed(0)} %).` : null,
+      note: autoAccept ? `auto:${(suggestion!.score * 100).toFixed(0)}` : null,
       decidedBy: autoAccept ? (options.decidedBy ?? "auto") : null,
       decidedAt: autoAccept ? nowIso() : null,
       updatedAt: nowIso(),
@@ -326,11 +326,20 @@ export function acceptTrophySuggestions(psGameId: number, minScore: number, deci
     if (m.suggestedXboxAchievementId && (m.suggestionConfidence ?? 0) >= minScore) {
       decideTrophyMapping(m.psTrophyId, {
         xboxAchievementId: m.suggestedXboxAchievementId,
-        note: `Vorschlag übernommen (Ähnlichkeit ${((m.suggestionConfidence ?? 0) * 100).toFixed(0)} %).`,
+        note: `suggestion:${((m.suggestionConfidence ?? 0) * 100).toFixed(0)}`,
         decidedBy,
       });
       n++;
     }
   }
   return n;
+}
+
+/** Übersetzt maschinelle Notizen ("platinum", "auto:95", "suggestion:90"); Freitext bleibt unverändert. */
+export function renderNote(t: (key: "mapping.note.platinum" | "mapping.note.auto" | "mapping.note.suggestion", vars?: Record<string, string | number>) => string, note: string | null | undefined): string | null {
+  if (!note) return null;
+  if (note === "platinum") return t("mapping.note.platinum");
+  const m = /^(auto|suggestion):(\d+)$/.exec(note);
+  if (m) return t(m[1] === "auto" ? "mapping.note.auto" : "mapping.note.suggestion", { p: m[2] });
+  return note;
 }

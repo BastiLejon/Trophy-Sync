@@ -1,13 +1,15 @@
 import Link from "next/link";
-import { and, count, eq, sql } from "drizzle-orm";
+import { count, eq, sql } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth";
+import { getT } from "@/lib/i18n/server";
 import { db, schema } from "@/lib/db";
 import { decideGame, recomputeSuggestions } from "@/app/actions/admin";
-import { Artwork, PageHeader, StatusBadge } from "@/components/ui";
+import { Artwork, PageHeader } from "@/components/ui";
+import { StatusBadge } from "@/components/badges";
 import { percent } from "@/lib/format";
 
 export default async function AdminGamesPage() {
-  await requireAdmin();
+  const [, { t }] = await Promise.all([requireAdmin(), getT()]);
   const { psGames, gameMappings, xboxTitles, psTrophies, trophyMappings } = schema;
   const rows = db
     .select({ game: psGames, mapping: gameMappings })
@@ -16,38 +18,31 @@ export default async function AdminGamesPage() {
     .orderBy(sql`case ${gameMappings.status} when 'pending' then 0 when 'mapped' then 1 else 2 end`, psGames.name)
     .all();
   const titles = db.select().from(xboxTitles).orderBy(xboxTitles.name).all();
-  const titleById = new Map(titles.map((t) => [t.id, t]));
+  const titleById = new Map(titles.map((x) => [x.id, x]));
 
-  const pendingTrophies = new Map(
-    db
-      .select({ psGameId: psTrophies.psGameId, n: count() })
-      .from(trophyMappings)
-      .innerJoin(psTrophies, eq(trophyMappings.psTrophyId, psTrophies.id))
-      .where(eq(trophyMappings.status, "pending"))
-      .groupBy(psTrophies.psGameId)
-      .all()
-      .map((r) => [r.psGameId, r.n]),
-  );
-  const mappedTrophies = new Map(
-    db
-      .select({ psGameId: psTrophies.psGameId, n: count() })
-      .from(trophyMappings)
-      .innerJoin(psTrophies, eq(trophyMappings.psTrophyId, psTrophies.id))
-      .where(and(eq(trophyMappings.status, "mapped")))
-      .groupBy(psTrophies.psGameId)
-      .all()
-      .map((r) => [r.psGameId, r.n]),
-  );
+  const countByStatus = (status: "pending" | "mapped") =>
+    new Map(
+      db
+        .select({ psGameId: psTrophies.psGameId, n: count() })
+        .from(trophyMappings)
+        .innerJoin(psTrophies, eq(trophyMappings.psTrophyId, psTrophies.id))
+        .where(eq(trophyMappings.status, status))
+        .groupBy(psTrophies.psGameId)
+        .all()
+        .map((r) => [r.psGameId, r.n]),
+    );
+  const pendingTrophies = countByStatus("pending");
+  const mappedTrophies = countByStatus("mapped");
 
   return (
     <div>
-      <div className="mb-4 text-sm"><Link href="/admin" className="text-muted hover:text-foreground">← Admin</Link></div>
+      <div className="mb-4 text-sm"><Link href="/admin" className="text-muted hover:text-foreground">← {t("common.backToAdmin")}</Link></div>
       <PageHeader
-        title="Spiel-Mappings"
-        subtitle="Ordne jedem PlayStation-Spiel den passenden Xbox-Titel zu oder markiere es als „kein Gegenstück“."
+        title={t("adminGames.title")}
+        subtitle={t("adminGames.subtitle")}
         actions={
           <form action={recomputeSuggestions}>
-            <button className="btn-ghost">Vorschläge neu berechnen</button>
+            <button className="btn-ghost">{t("adminGames.recompute")}</button>
           </form>
         }
       />
@@ -68,17 +63,18 @@ export default async function AdminGamesPage() {
                     <StatusBadge status={status} />
                   </div>
                   <div className="mt-1 text-xs text-muted">
-                    {total} Trophäen · {game.npCommunicationId}
+                    {t("adminGames.trophiesCount", { n: total })} · {game.npCommunicationId}
                     {status === "mapped" && chosen && (
-                      <> · Xbox: <b className="text-foreground">{chosen.name}</b> · Trophäen gemappt: {mappedTrophies.get(game.id) ?? 0}
-                        {(pendingTrophies.get(game.id) ?? 0) > 0 && <span className="text-warning"> · offen: {pendingTrophies.get(game.id)}</span>}
+                      <>
+                        {" "}· {t("adminGames.xbox")} <b className="text-foreground">{chosen.name}</b> · {t("adminGames.trophiesMapped", { n: mappedTrophies.get(game.id) ?? 0 })}
+                        {(pendingTrophies.get(game.id) ?? 0) > 0 && <span className="text-warning"> · {t("adminGames.trophiesOpen", { n: pendingTrophies.get(game.id) ?? 0 })}</span>}
                       </>
                     )}
                     {status === "no_counterpart" && mapping?.note && <> · {mapping.note}</>}
                   </div>
                 </div>
                 {status === "mapped" && (
-                  <Link href={`/admin/games/${game.id}`} className="btn-primary">Trophäen zuordnen</Link>
+                  <Link href={`/admin/games/${game.id}`} className="btn-primary">{t("adminGames.assignTrophies")}</Link>
                 )}
               </div>
 
@@ -87,36 +83,37 @@ export default async function AdminGamesPage() {
                   <input type="hidden" name="psGameId" value={game.id} />
                   <div>
                     <label className="mb-1 block text-xs text-muted">
-                      Xbox-Titel {suggestion && <>· Vorschlag: <b className="text-foreground">{suggestion.name}</b> ({percent(mapping?.suggestionConfidence)})</>}
+                      {t("adminGames.xboxTitle")}{" "}
+                      {suggestion && <>· {t("adminGames.suggestion")} <b className="text-foreground">{suggestion.name}</b> ({percent(mapping?.suggestionConfidence)})</>}
                     </label>
                     <select name="xboxTitleId" className="input" defaultValue={suggestion?.id ?? ""}>
-                      <option value="">– Xbox-Titel wählen –</option>
-                      {titles.map((t) => (
-                        <option key={t.id} value={t.id}>{t.name} ({t.achievementCount} Achievements, {t.totalGamerscore} G)</option>
+                      <option value="">{t("adminGames.choose")}</option>
+                      {titles.map((x) => (
+                        <option key={x.id} value={x.id}>{x.name} ({t("adminGames.optionInfo", { n: x.achievementCount, g: x.totalGamerscore })})</option>
                       ))}
                     </select>
                     <label className="mt-2 flex items-center gap-2 text-xs text-muted">
-                      <input type="checkbox" name="autoAccept" value="on" defaultChecked /> Sehr sichere Trophäen-Treffer automatisch übernehmen
+                      <input type="checkbox" name="autoAccept" value="on" defaultChecked /> {t("adminGames.autoAccept")}
                     </label>
                   </div>
                   <div className="flex items-end">
-                    <button name="intent" value="map" className="btn-xbox">Zuordnen</button>
+                    <button name="intent" value="map" className="btn-xbox">{t("adminGames.assign")}</button>
                   </div>
                   <div className="flex items-end">
-                    <button name="intent" value="none" className="btn-ghost" formNoValidate>Kein Gegenstück</button>
+                    <button name="intent" value="none" className="btn-ghost" formNoValidate>{t("adminGames.none")}</button>
                   </div>
                 </form>
               )}
               {status !== "pending" && (
                 <form action={decideGame} className="mt-3 flex justify-end">
                   <input type="hidden" name="psGameId" value={game.id} />
-                  <button name="intent" value="reset" className="text-xs text-muted hover:text-foreground">Entscheidung zurücksetzen</button>
+                  <button name="intent" value="reset" className="text-xs text-muted hover:text-foreground">{t("adminGames.reset")}</button>
                 </form>
               )}
             </div>
           );
         })}
-        {rows.length === 0 && <div className="card text-sm text-muted">Noch keine PlayStation-Spiele im Katalog. Sie erscheinen nach dem ersten Nutzer-Sync.</div>}
+        {rows.length === 0 && <div className="card text-sm text-muted">{t("adminGames.empty")}</div>}
       </div>
     </div>
   );

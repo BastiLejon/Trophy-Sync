@@ -3,14 +3,14 @@
 import { useActionState } from "react";
 import { startSync } from "@/app/actions/sync";
 
-export function SyncButton() {
+export function SyncButton({ labels }: { labels: { button: string; running: string } }) {
   const [state, action, pending] = useActionState(startSync, undefined);
   return (
     <form action={action} className="flex flex-col items-end gap-2">
       <button className="btn-primary" disabled={pending}>
-        {pending ? "Synchronisiere…" : "Jetzt synchronisieren"}
+        {pending ? labels.running : labels.button}
       </button>
-      {state?.error && <span className="text-xs text-danger">{state.error}</span>}
+      {state?.error && <span className="max-w-sm text-right text-xs text-danger">{state.error}</span>}
     </form>
   );
 }

@@ -1,0 +1,14 @@
+services:
+  trophy-sync:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file: .env
+    environment:
+      DATABASE_PATH: /data/trophy-sync.db
+    volumes:
+      - trophy-data:/data
+    restart: unless-stopped
+
+volumes:
+  trophy-data:
